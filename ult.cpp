@@ -638,11 +638,8 @@ int main() {
     {
     id_thread[i]=i; thread[i]=id_thread[i];
     ult_create(&thread[i], worker_mutex, &id_thread[i]);
+    ult_join(thread[i], {nullptr});
     }
-
-    ult_join(thread[1], nullptr);
-    ult_join(thread[2], nullptr);
-    ult_join(thread[3], nullptr);
 
     std::printf("final counter: %d (expected %d)\n", global_counter, 3 * 5);
     break;
