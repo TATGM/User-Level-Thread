@@ -1,5 +1,6 @@
 #include "ult.h"
 
+#include <iostream>
 #include <csignal>
 #include <cstring>
 #include <deque>
@@ -311,6 +312,7 @@ void maybe_reap_thread(ult_tid_t tid) {
 
 }  // namespace
 
+// initializes the thread library and its internal structures
 int ult_init(unsigned int quantum_us) {
   if (global_initialized) {
     return 0;
@@ -334,6 +336,7 @@ int ult_init(unsigned int quantum_us) {
   return 0;
 }
 
+// creates a new thread
 int ult_create(ult_tid_t* tid, void* (*start_routine)(void*), void* arg) {
   ensure_initialized();
   if (!tid || !start_routine) {
@@ -364,12 +367,14 @@ int ult_create(ult_tid_t* tid, void* (*start_routine)(void*), void* arg) {
   return 0;
 }
 
+// returns the value of the currently executing thread.
 ult_tid_t ult_self() {
   ensure_initialized();
   check_preempt();
   return global_current_thread_id;
 }
 
+// suspends the calling thread until the specified thread_id terminates
 int ult_join(ult_tid_t tid, void** return_value) {
   ensure_initialized();
   if (tid == global_current_thread_id) {
@@ -408,6 +413,7 @@ int ult_join(ult_tid_t tid, void** return_value) {
   return 0;
 }
 
+// terminates the calling thread
 void ult_exit(void* return_value) {
   ensure_initialized();
   SignalBlocker guard;
@@ -448,6 +454,7 @@ void ult_exit(void* return_value) {
   _exit(0);
 }
 
+// voluntarily relinquishes the CPU
 int ult_yield() {
   ensure_initialized();
   check_preempt();
@@ -455,6 +462,7 @@ int ult_yield() {
   return 0;
 }
 
+// prepares the ult_mutex structure for use
 int ult_mutex_init(ult_mutex* mutex) {
   if (!mutex) {
     return -1;
@@ -466,6 +474,7 @@ int ult_mutex_init(ult_mutex* mutex) {
   return 0;
 }
 
+// acquires the mutex or blocks the calling thread if it's already held
 int ult_mutex_lock(ult_mutex* mutex) {
   ensure_initialized();
   if (!mutex || !mutex->initialized) {
@@ -494,6 +503,7 @@ int ult_mutex_lock(ult_mutex* mutex) {
   return 0;
 }
 
+// releases the mutex and wakes up the next waiting thread
 int ult_mutex_unlock(ult_mutex* mutex) {
   ensure_initialized();
   if (!mutex || !mutex->initialized || !mutex->locked) {
@@ -597,7 +607,10 @@ void* worker(void* arg) {
 
 void* spinner(void*) {
   volatile unsigned long x = 0;
-  while (x < 500000000UL) { x++; }
+  while (x < 500000000UL)
+  {
+      x=x+1;
+  }
   return nullptr;
 }
 
@@ -610,24 +623,26 @@ void* printer(void*) {
 }
 
 int main() {
-    ult_tid_t t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12;
+    ult_tid_t thread[100];
     
-    int scenario=2;
+    int scenario=1;
     
     switch(scenario) {
     case 1: {
     ult_init(2000);
     ult_mutex_init(&global_mutex);
 
-    int id1 = 1, id2 = 2, id3 = 3;
+    int id_thread[100];
 
-    ult_create(&t1, worker_mutex, &id1);
-    ult_create(&t2, worker_mutex, &id2);
-    ult_create(&t3, worker_mutex, &id3);
+    for(int i=1; i<=3; i++)
+    {
+    id_thread[i]=i; thread[i]=id_thread[i];
+    ult_create(&thread[i], worker_mutex, &id_thread[i]);
+    }
 
-    ult_join(t1, nullptr);
-    ult_join(t2, nullptr);
-    ult_join(t3, nullptr);
+    ult_join(thread[1], nullptr);
+    ult_join(thread[2], nullptr);
+    ult_join(thread[3], nullptr);
 
     std::printf("final counter: %d (expected %d)\n", global_counter, 3 * 5);
     break;
@@ -636,55 +651,25 @@ int main() {
     case 2: {
     ult_init(2000);
 
-    int a = 1;
-    int b = 2;
-    int c = 3;
-    int d = 4;
-    int e = 5;
-    int f = 6;
-    int g = 7;
-    int h = 8;
-    int i = 9;
-    int j = 10;
+    int variables[100];
 
-    ult_create(&t1, worker, &a);
-    ult_create(&t2, worker, &b);
-    ult_create(&t3, worker, &c);
-    ult_create(&t4, worker, &d);
-    ult_create(&t5, worker, &e);
-    ult_create(&t6, worker, &f);
-    ult_create(&t7, worker, &g);
-    ult_create(&t8, worker, &h);
-    ult_create(&t9, worker, &i);
-    ult_create(&t10, worker, &j);
-    ult_create(&t11, spinner, nullptr);
-    ult_create(&t12, printer, nullptr);
+    for(int i=1; i<=10; i++) {
+        variables[i]=i;
+        ult_create(&thread[i], worker, &variables[i]);
+    }
+    ult_create(&thread[11], spinner, nullptr);
+    ult_create(&thread[12], printer, nullptr);
 
-    void* r1 = nullptr;
-    void* r2 = nullptr;
-    void* r3 = nullptr;
-    void* r4 = nullptr;
-    void* r5 = nullptr;
-    void* r6 = nullptr;
-    void* r7 = nullptr;
-    void* r8 = nullptr;
-    void* r9 = nullptr;
-    void* r10 = nullptr;
+    for(int i=1; i<=10; i++)
+    {
+    void* result[i] = {nullptr};
+    ult_join(thread[i], &result[i]);
+    printf("joined result: %ld\n", (long)result[i]);
+    }
+    
+    ult_join(thread[11], nullptr);
+    ult_join(thread[12], nullptr);
 
-    ult_join(t1, &r1);
-    ult_join(t2, &r2);
-    ult_join(t3, &r3);
-    ult_join(t4, &r4);
-    ult_join(t5, &r5);
-    ult_join(t6, &r6);
-    ult_join(t7, &r7);
-    ult_join(t8, &r8);
-    ult_join(t9, &r9);
-    ult_join(t10, &r10);
-    ult_join(t11, nullptr);
-    ult_join(t12, nullptr);
-
-    printf("joined results: %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld\n", (long)r1, (long)r2, (long)r3, (long)r4, (long)r5, (long)r6, (long)r7, (long)r8, (long)r9, (long)r10);
     break;
     }
     }
