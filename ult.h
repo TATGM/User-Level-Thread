@@ -25,7 +25,7 @@ struct ult_mutex {
 };
 
 int ult_mutex_init(ult_mutex* mutex); // prepares the ult_mutex structure for use
-int ult_mutex_lock(ult_mutex* mutex); // // acquires the mutex or blocks the calling thread if it's already held
+int ult_mutex_lock(ult_mutex* mutex); // acquires the mutex or blocks the calling thread if it's already held
 int ult_mutex_unlock(ult_mutex* mutex); // releases the mutex and wakes up the next waiting thread
 
 #endif
