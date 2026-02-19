@@ -32,7 +32,7 @@ enum class WaitType {
 };
 
 struct Thread {
-  ult_tid_t tid = -1;
+  ult_tid_t thread_id = -1;
   ucontext_t context{};
   ThreadState state = ThreadState::READY;
   void* return_value = nullptr;
@@ -136,17 +136,17 @@ void report_deadlocks() {
       continue;
     }
     std::set<ult_tid_t> seen;
-    ult_tid_t cur = start;
-    while (wait_for.count(cur)) {
-      if (seen.count(cur)) {
-        out += "  cycle detected starting at tid " + std::to_string(cur) + "\n";
-        for (auto tid : seen) {
-          reported.insert(tid);
+    ult_tid_t current = start;
+    while (wait_for.count(current)) {
+      if (seen.count(current)) {
+        out += "  cycle detected starting at tid " + std::to_string(current) + "\n";
+        for (auto thread_id : seen) {
+          reported.insert(thread_id);
         }
         break;
       }
-      seen.insert(cur);
-      cur = wait_for[cur];
+      seen.insert(current);
+      current = wait_for[current];
     }
   }
 
@@ -184,17 +184,17 @@ void sigvtalrm_handler(int, siginfo_t*, void* ucontext) {
     return;
   }
   auto* context = reinterpret_cast<ucontext_t*>(ucontext);
-  greg_t rip = context->uc_mcontext.gregs[REG_RIP];
+  greg_t rip = context->uc_mcontext.gregs[REG_RIP]; //instruction pointer
   if (rip == reinterpret_cast<greg_t>(preempt_trampoline)) {
     return;
   }
-  greg_t rsp = context->uc_mcontext.gregs[REG_RSP];
+  greg_t rsp = context->uc_mcontext.gregs[REG_RSP]; //stack pointer
   uintptr_t stack_low = global_stack_low;
   uintptr_t stack_high = global_stack_high;
   if (stack_low == 0 || stack_high == 0) {
     return;
   }
-  uintptr_t new_rsp = static_cast<uintptr_t>(rsp) - sizeof(uintptr_t);
+  uintptr_t new_rsp = static_cast<uintptr_t>(rsp) - sizeof(uintptr_t); //new stack pointer
   if (new_rsp < stack_low || new_rsp + sizeof(uintptr_t) > stack_high) {
     return;
   }
@@ -217,27 +217,27 @@ void init_signals() {
   sigemptyset(&global_timer_mask);
   sigaddset(&global_timer_mask, SIGVTALRM);
 
-  struct sigaction sa;
-  std::memset(&sa, 0, sizeof(sa));
-  sa.sa_sigaction = sigvtalrm_handler;
-  sa.sa_flags = SA_SIGINFO;
-  sigemptyset(&sa.sa_mask);
-  sigaction(SIGVTALRM, &sa, nullptr);
+  struct sigaction signal_action;
+  std::memset(&signal_action, 0, sizeof(signal_action));
+  signal_action.sa_sigaction = sigvtalrm_handler;
+  signal_action.sa_flags = SA_SIGINFO;
+  sigemptyset(&signal_action.sa_mask);
+  sigaction(SIGVTALRM, &signal_action, nullptr);
 
-  std::memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = sigquit_handler;
-  sigemptyset(&sa.sa_mask);
-  sigaction(SIGQUIT, &sa, nullptr);
+  std::memset(&signal_action, 0, sizeof(signal_action));
+  signal_action.sa_handler = sigquit_handler;
+  sigemptyset(&signal_action.sa_mask);
+  sigaction(SIGQUIT, &signal_action, nullptr);
 
   signal(SIGPIPE, SIG_IGN);
 }
 
 void start_timer(unsigned int quantum_us) {
-  itimerval tv{};
-  tv.it_interval.tv_sec = quantum_us / 1000000;
-  tv.it_interval.tv_usec = quantum_us % 1000000;
-  tv.it_value = tv.it_interval;
-  setitimer(ITIMER_VIRTUAL, &tv, nullptr);
+  itimerval time_value{};
+  time_value.it_interval.tv_sec = quantum_us / 1000000;
+  time_value.it_interval.tv_usec = quantum_us % 1000000;
+  time_value.it_value = time_value.it_interval;
+  setitimer(ITIMER_VIRTUAL, &time_value, nullptr);
 }
 
 void schedule_next() {
@@ -281,32 +281,32 @@ void ensure_initialized() {
   ult_init(5000);
 }
 
-void wake_joiners(Thread& t) {
-  for (ult_tid_t tid : t.joiners) {
-    Thread& waiter = global_threads[tid];
+void wake_joiners(Thread& thread) {
+  for (ult_tid_t thread_id : thread.joiners) {
+    Thread& waiter = global_threads[thread_id];
     if (waiter.state == ThreadState::BLOCKED) {
       waiter.state = ThreadState::READY;
       waiter.wait_type = WaitType::NONE;
       waiter.wait_object = nullptr;
-      enqueue_ready(tid);
+      enqueue_ready(thread_id);
     }
   }
-  t.joiners.clear();
+  thread.joiners.clear();
 }
 
-void maybe_reap_thread(ult_tid_t tid) {
-  auto it = global_threads.find(tid);
-  if (it == global_threads.end()) {
+void maybe_reap_thread(ult_tid_t thread_id) {
+  auto iterator = global_threads.find(thread_id);
+  if (iterator == global_threads.end()) {
     return;
   }
-  Thread& t = it->second;
-  if (t.state != ThreadState::TERMINATED || !t.stack) {
+  Thread& thread = iterator->second;
+  if (thread.state != ThreadState::TERMINATED || !thread.stack) {
     return;
   }
-  delete[] reinterpret_cast<char*>(t.stack);
-  t.stack = nullptr;
-  if (t.joiners.empty()) {
-    global_threads.erase(it);
+  delete[] reinterpret_cast<char*>(thread.stack);
+  thread.stack = nullptr;
+  if (thread.joiners.empty()) {
+    global_threads.erase(iterator);
   }
 }
 
@@ -323,7 +323,7 @@ int ult_init(unsigned int quantum_us) {
   start_timer(quantum_us);
 
   Thread main_thread;
-  main_thread.tid = kMainThreadId;
+  main_thread.thread_id = kMainThreadId;
   main_thread.state = ThreadState::RUNNING;
   getcontext(&main_thread.context);
   main_thread.stack_low = 0;
@@ -337,16 +337,16 @@ int ult_init(unsigned int quantum_us) {
 }
 
 // creates a new thread
-int ult_create(ult_tid_t* tid, void* (*start_routine)(void*), void* arg) {
+int ult_create(ult_tid_t* thread_id, void* (*start_routine)(void*), void* arg) {
   ensure_initialized();
-  if (!tid || !start_routine) {
+  if (!thread_id || !start_routine) {
     return -1;
   }
   check_preempt();
 
   SignalBlocker guard;
   Thread thread;
-  thread.tid = global_next_thread_id++;
+  thread.thread_id = global_next_thread_id++;
   thread.state = ThreadState::READY;
   thread.stack = new char[kStackSize];
   thread.stack_low = reinterpret_cast<uintptr_t>(thread.stack);
@@ -361,9 +361,9 @@ int ult_create(ult_tid_t* tid, void* (*start_routine)(void*), void* arg) {
               reinterpret_cast<uintptr_t>(start_routine),
               reinterpret_cast<uintptr_t>(arg));
 
-  global_threads[thread.tid] = thread;
-  enqueue_ready(thread.tid);
-  *tid = thread.tid;
+  global_threads[thread.thread_id] = thread;
+  enqueue_ready(thread.thread_id);
+  *thread_id = thread.thread_id;
   return 0;
 }
 
@@ -375,33 +375,33 @@ ult_tid_t ult_self() {
 }
 
 // suspends the calling thread until the specified thread_id terminates
-int ult_join(ult_tid_t tid, void** return_value) {
+int ult_join(ult_tid_t thread_id, void** return_value) {
   ensure_initialized();
-  if (tid == global_current_thread_id) {
+  if (thread_id == global_current_thread_id) {
     return -1;
   }
   check_preempt();
 
   SignalBlocker guard;
-  auto it = global_threads.find(tid);
-  if (it == global_threads.end()) {
+  auto iterator = global_threads.find(thread_id);
+  if (iterator == global_threads.end()) {
     return -1;
   }
 
-  Thread& target = it->second;
+  Thread& target = iterator->second;
   if (target.state == ThreadState::TERMINATED) {
     if (return_value) {
       *return_value = target.return_value;
     }
-    maybe_reap_thread(tid);
+    maybe_reap_thread(thread_id);
     return 0;
   }
 
   Thread& self = global_threads[global_current_thread_id];
   self.state = ThreadState::BLOCKED;
   self.wait_type = WaitType::JOIN;
-  self.wait_object = &target.tid;
-  target.joiners.push_back(self.tid);
+  self.wait_object = &target.thread_id;
+  target.joiners.push_back(self.thread_id);
 
   schedule_next();
 
@@ -409,7 +409,7 @@ int ult_join(ult_tid_t tid, void** return_value) {
     *return_value = target.return_value;
   }
 
-  maybe_reap_thread(tid);
+  maybe_reap_thread(thread_id);
   return 0;
 }
 
@@ -424,10 +424,10 @@ void ult_exit(void* return_value) {
   wake_joiners(self);
 
   if (global_ready_queue.empty()) {
-    auto it = global_threads.find(kMainThreadId);
-    if (it != global_threads.end() && it->second.state != ThreadState::TERMINATED &&
+    auto iterator = global_threads.find(kMainThreadId);
+    if (iterator != global_threads.end() && iterator->second.state != ThreadState::TERMINATED &&
         kMainThreadId != global_current_thread_id) {
-      Thread& main_thread = it->second;
+      Thread& main_thread = iterator->second;
       main_thread.state = ThreadState::RUNNING;
       main_thread.in_ready_queue = false;
       global_current_thread_id = kMainThreadId;
@@ -439,7 +439,7 @@ void ult_exit(void* return_value) {
   }
 
   if (self.stack) {
-    global_zombie_queue.push_back(self.tid);
+    global_zombie_queue.push_back(self.thread_id);
   }
 
   ult_tid_t next_thread_id = global_ready_queue.front();
@@ -497,7 +497,7 @@ int ult_mutex_lock(ult_mutex* mutex) {
   self.state = ThreadState::BLOCKED;
   self.wait_type = WaitType::MUTEX;
   self.wait_object = mutex;
-  mutex->waiters.push_back(self.tid);
+  mutex->waiters.push_back(self.thread_id);
 
   schedule_next();
   return 0;
@@ -574,11 +574,11 @@ void* worker_mutex(void* arg) {
 std::string format_timestamp() {
   timespec timestamp{};
   clock_gettime(CLOCK_REALTIME, &timestamp);
-  tm tm_now{};
-  localtime_r(&timestamp.tv_sec, &tm_now);
+  tm time_now{};
+  localtime_r(&timestamp.tv_sec, &time_now);
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%06ld",
-                tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec,
+                time_now.tm_hour, time_now.tm_min, time_now.tm_sec,
                 timestamp.tv_nsec / 1000);
   return std::string(buf);
 }
